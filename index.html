@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Message App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #FFDEE9, #B5FFFC);
+        }
+        
+        .container {
+            text-align: center;
+            background: #fff;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2);
+            max-width: 500px;
+            width: 100%;
+        }
+        
+        input[type="text"] {
+            width: 90%;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+        
+        select,
+        input[type="range"] {
+            width: 100%;
+            margin-bottom: 15px;
+            padding: 8px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            color: #fff;
+            background: #007bff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+        
+        .output {
+            margin-top: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
+            animation: typing 2s steps(20, end), blink 0.5s step-end infinite alternate;
+            white-space: nowrap;
+            overflow: hidden;
+            display: inline-block;
+            border-right: 2px solid #000;
+        }
+        
+        @keyframes typing {
+            from {
+                width: 0;
+            }
+            to {
+                width: 100%;
+            }
+        }
+        
+        @keyframes blink {
+            50% {
+                border-color: transparent;
+            }
+        }
+        
+        canvas {
+            margin-top: 20px;
+            width: 100%;
+            height: 100px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h2>Voice Message App</h2>
+        <input type="text" id="textInput" placeholder="Type your message..." oninput="livePreview()">
+        <select id="voiceSelect"></select>
+        <label for="rate">Speed: <span id="rateValue">1</span></label>
+        <input type="range" id="rate" min="0.5" max="2" value="1" step="0.1">
+        <label for="pitch">Pitch: <span id="pitchValue">1</span></label>
+        <input type="range" id="pitch" min="0.5" max="2" value="1" step="0.1">
+        <button onclick="generateVoiceMessage()">Speak</button>
+        <button onclick="startSpeechRecognition()">Speak Input</button>
+        <button onclick="translateText()">Translate & Speak</button>
+        <canvas id="visualizer"></canvas>
+        <div class="output" id="outputText"></div>
+    </div>
+
+    <script>
+        const voiceSelect = document.getElementById("voiceSelect");
+        const outputText = document.getElementById("outputText");
+        const rate = document.getElementById("rate");
+        const pitch = document.getElementById("pitch");
+        const rateValue = document.getElementById("rateValue");
+        const pitchValue = document.getElementById("pitchValue");
+        const visualizer = document.getElementById("visualizer");
+        const canvasCtx = visualizer.getContext("2d");
+        let voices = [];
+        let audioContext, analyser, dataArray;
+
+        function loadVoices() {
+            voices = window.speechSynthesis.getVoices();
+            voiceSelect.innerHTML = voices
+                .map(voice => `<option value="${voice.name}">${voice.name} (${voice.lang})</option>`)
+                .join("");
+        }
+
+        rate.addEventListener("input", () => rateValue.textContent = rate.value);
+        pitch.addEventListener("input", () => pitchValue.textContent = pitch.value);
+
+        function generateVoiceMessage() {
+            const textInput = document.getElementById("textInput").value;
+            if (!textInput.trim()) {
+                alert("Please enter some text!");
+                return;
+            }
+            outputText.textContent = textInput;
+
+            const speech = new SpeechSynthesisUtterance(textInput);
+            speech.voice = voices.find(voice => voice.name === voiceSelect.value);
+            speech.rate = parseFloat(rate.value);
+            speech.pitch = parseFloat(pitch.value);
+
+            window.speechSynthesis.speak(speech);
+            startVisualizer(speech);
+        }
+
+        function livePreview() {
+            const textInput = document.getElementById("textInput").value;
+            outputText.textContent = textInput;
+        }
+
+        function startSpeechRecognition() {
+            const recognition = new(window.SpeechRecognition || window.webkitSpeechRecognition)();
+            recognition.lang = "en-US";
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                document.getElementById("textInput").value = transcript;
+                livePreview();
+            };
+
+            recognition.start();
+        }
+
+        function translateText() {
+            const textInput = document.getElementById("textInput").value;
+            if (!textInput.trim()) {
+                alert("Please enter some text!");
+                return;
+            }
+
+            fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(textInput)}&langpair=en|es`)
+                .then(response => response.json())
+                .then(data => {
+                    const translatedText = data.responseData.translatedText;
+                    document.getElementById("textInput").value = translatedText;
+                    livePreview();
+                    generateVoiceMessage();
+                });
+        }
+
+        function startVisualizer(speech) {
+            audioContext = audioContext || new AudioContext();
+            analyser = audioContext.createAnalyser();
+            const destination = audioContext.createMediaStreamDestination();
+
+            const source = audioContext.createMediaStreamSource(destination.stream);
+            source.connect(analyser);
+
+            analyser.fftSize = 256;
+            const bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+            canvasCtx.clearRect(0, 0, visualizer.width, visualizer.height);
+
+            function draw() {
+                requestAnimationFrame(draw);
+                analyser.getByteFrequencyData(dataArray);
+
+                canvasCtx.fillStyle = '#f5f5f5';
+                canvasCtx.fillRect(0, 0, visualizer.width, visualizer.height);
+
+                const barWidth = (visualizer.width / bufferLength) * 2.5;
+                let barHeight;
+                let x = 0;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    barHeight = dataArray[i] / 2;
+
+                    canvasCtx.fillStyle = `rgb(${barHeight + 100},50,150)`;
+                    canvasCtx.fillRect(x, visualizer.height - barHeight / 2, barWidth, barHeight);
+
+                    x += barWidth + 1;
+                }
+            }
+
+            draw();
+        }
+
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+        loadVoices();
+    </script>
+</body>
+
+</html>
